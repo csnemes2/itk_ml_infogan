@@ -2,6 +2,79 @@ import tensorflow as tf
 import sys
 from tf_wrappers import *
 from train import *
+import numpy as np
+
+class RecognizedDistribution():
+    def __init__(self,type_string,cat_num=10):
+        self.type_string = type_string
+        self.cat_num = cat_num
+
+regularized_latent_variable_distribution = RecognizedDistribution("categorical",cat_num=3)
+#regularized_latent_variable_distribution = RecognizedDistribution("uniform")
+
+
+def tf_noise_generator(batch_size, noise_dim):
+    global regularized_latent_variable_distribution
+    ret = []
+
+    ret.append(tf.cast(tf.random_uniform([batch_size, noise_dim-1], minval=-1., maxval=1.),
+                       tf.float32))
+
+    if regularized_latent_variable_distribution.type_string == "uniform":
+        ret.append(tf.cast(tf.random_uniform([batch_size, 1], minval=-1., maxval=1.),
+                           tf.float32))
+    else:
+        cats= regularized_latent_variable_distribution.cat_num
+        probs=np.ones([cats],dtype=np.float32)/cats
+        x = tf.contrib.distributions.Categorical(probs,dtype=tf.float32).sample(batch_size)/cats
+        x = tf.reshape(x,[batch_size,1])
+        ret.append(x)
+
+    return tf.concat(ret, 1)
+
+def cpu_noise_generator(batch_size, noise_dim):
+    global regularized_latent_variable_distribution
+    ret=[]
+    ret.append(np.random.uniform(-1, 1, size=[batch_size, noise_dim-1]))
+
+    if regularized_latent_variable_distribution.type_string == "uniform":
+        ret.append(np.random.uniform(-1, 1, size=[batch_size, 1]))
+    else:
+        cats = regularized_latent_variable_distribution.cat_num
+        ret.append((np.random.random_integers(cats, size=batch_size).reshape(batch_size,1)-1)/cats)
+
+    return np.concatenate(ret,axis=1)
+
+def cpu_noise_generator_tricky(batch_size, noise_dim):
+    global regularized_latent_variable_distribution
+    cats = regularized_latent_variable_distribution.cat_num
+
+    vis_size = 10
+    if regularized_latent_variable_distribution.type_string == "uniform":
+        repeat_noise = int(10)
+    else:
+        repeat_noise = cats
+
+    noise_mtx = np.tile(
+        np.random.uniform(-1, 1, size=[vis_size, noise_dim - 1]),
+        [repeat_noise, 1])
+
+    if regularized_latent_variable_distribution.type_string == "uniform":
+        latent_mtx = np.arange(-1, 1, 2.0 / repeat_noise)[:repeat_noise]
+    else:
+        latent_mtx = np.arange(0, repeat_noise, 1)[:repeat_noise]/cats
+
+    # well, not very elegant
+    latent_mtx = np.tile(latent_mtx.reshape(repeat_noise, 1), (1, vis_size)).reshape(
+        repeat_noise * vis_size, 1)
+
+    tricky_z_batch = np.concatenate([latent_mtx, noise_mtx], axis=1)
+    tricky_z_batch = np.concatenate([
+        tricky_z_batch,
+        np.random.uniform(-1, 1,
+                          size=[batch_size - (repeat_noise * vis_size), noise_dim])
+    ], axis=0)
+    return tricky_z_batch
 
 def generator(z, batch_size, reuse=False, img_size=28):
     """
@@ -54,4 +127,4 @@ def discriminator(x_image, reuse=False):
 
         return ret5
 
-train(generator, discriminator)
+train(generator, discriminator, tf_noise_generator, cpu_noise_generator, cpu_noise_generator_tricky)

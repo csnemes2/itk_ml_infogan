@@ -7,14 +7,7 @@ from tf_wrappers import *
 import matplotlib.pyplot as plt
 
 
-def train(generator, discriminator):
-    def noise_generator(batch_size, noise_dim):
-        ret = []
-        for i in range(0, noise_dim):
-            ret.append(tf.cast(tf.random_uniform([batch_size, 1], minval=-1., maxval=1.),
-                               tf.float32))
-        return tf.concat(ret, 1)
-
+def train(generator, discriminator, tf_noise_generator, cpu_noise_generator, cpu_noise_generator_tricky):
     mnist = input_data.read_data_sets("MNIST_data/")
 
     noise_dim = 100
@@ -28,7 +21,7 @@ def train(generator, discriminator):
     # placeholder.shape[0] = batch size, None means arbitrary
     ph_x = tf.placeholder("float", shape=[None, 28, 28, 1])
     ph_z = tf.placeholder("float", shape=[None, noise_dim])
-    noise = noise_generator(batch_size, noise_dim)
+    noise = tf_noise_generator(batch_size, noise_dim)
 
     # generator
     fake_x = generator(noise, batch_size)
@@ -100,22 +93,7 @@ def train(generator, discriminator):
     g_trainer_op = tf.train.AdamOptimizer(learning_rate=1e-3, beta1=0.5).minimize(
         g_loss_op, var_list=g_vars)
 
-    # tricky test noise columns totally different
-    #                   rows only differ in one latent variable
-    repeat_noise = int(10)
-    noise_mtx = np.tile(
-        np.random.uniform(-1, 1, size=[repeat_noise, noise_dim - 1]),
-        [repeat_noise, 1])
-    latent_mtx = np.arange(-1, 1, 2.0 / repeat_noise)[:repeat_noise]
-    latent_mtx = np.tile(latent_mtx.reshape(repeat_noise, 1), (1, repeat_noise)).reshape(
-        repeat_noise * repeat_noise, 1)
-
-    tricky_z_batch = np.concatenate([latent_mtx, noise_mtx], axis=1)
-    tricky_z_batch = np.concatenate([
-        tricky_z_batch,
-        np.random.uniform(-1, 1,
-                          size=[batch_size - (repeat_noise * repeat_noise), noise_dim])
-    ], axis=0)
+    tricky_z_batch = cpu_noise_generator_tricky(batch_size, noise_dim)
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
@@ -129,7 +107,7 @@ def train(generator, discriminator):
                          "0")
 
         # no train
-        z_batch = np.random.uniform(-1, 1, size=[batch_size, noise_dim])
+        z_batch = cpu_noise_generator(batch_size, noise_dim)
         test_imgs, g_loss = sess.run([fake_x, g_loss_op], feed_dict={ph_z: z_batch})
         print_img_matrix(10, test_imgs, "no_train", "0")
 
@@ -148,7 +126,7 @@ def train(generator, discriminator):
                 real_image_batch, real_label_batch = mnist.train.next_batch(batch_size)
                 real_image_batch = np.reshape(real_image_batch, [batch_size, 28, 28, 1])
 
-                _, d_loss = sess.run([d_trainer_op, d_loss_op],
+                _, d_loss,tn = sess.run([d_trainer_op, d_loss_op,noise],
                                      feed_dict={ph_x: real_image_batch})
                 _, g_loss = sess.run([g_trainer_op, g_loss_op])
 
@@ -165,7 +143,7 @@ def train(generator, discriminator):
             print_img_matrix(10, test_imgs, "epoch", str(epoch))
 
         # test
-        z_batch = np.random.uniform(-1, 1, size=[batch_size, noise_dim])
+        z_batch = cpu_noise_generator(batch_size, noise_dim)
         test_imgs, g_loss = sess.run([fake_x, g_loss_op], feed_dict={ph_z: z_batch})
         print_img_matrix(10, test_imgs, "final", "0")
 
