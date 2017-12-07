@@ -83,8 +83,6 @@ def cpu_noise_generator_tricky(batch_size, noise_dim):
                           size=[batch_size - (repeat_noise * vis_size), noise_dim])
     ], axis=0)
 
-    print (tricky_z_batch[:10,-10:])
-
     return tricky_z_batch
 
 def generator(z, batch_size, reuse=False, img_size=28):
@@ -151,7 +149,7 @@ def q_loss_computation(noise,q_out):
     dist_type = regularized_latent_variable_distribution.dist_type
 
     if dist_type == "uniform":
-        loss = tf.reduce_mean(10*tf.square(noise[:,99] - q_out))
+        loss = tf.reduce_mean(tf.square(noise[:,-1:] - q_out))
 
     elif dist_type == "categorical":
         noise_oh = noise[:, -cat_num:]

@@ -18,7 +18,7 @@ def train(generator,
     noise_dim = 100
     batch_size = 128
     iterations = 100
-    epoch_num = 10
+    epoch_num = 20
 
     # placeholder.shape[0] = batch size, None means arbitrary
     ph_x = tf.placeholder("float", shape=[None, 28, 28, 1])
@@ -26,7 +26,7 @@ def train(generator,
     noise = tf_noise_generator(batch_size, noise_dim)
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        print(sess.run(noise[:20,-10:]))
+        print(sess.run(noise[:20,-5:]))
 
 
 
@@ -103,6 +103,7 @@ def train(generator,
         q_loss_op, var_list=tvars)
 
     tricky_z_batch = cpu_noise_generator_tricky(batch_size, noise_dim)
+    print(tricky_z_batch[:30, -5:])
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
@@ -117,7 +118,7 @@ def train(generator,
 
         # no train
         z_batch = cpu_noise_generator(batch_size, noise_dim)
-        print(z_batch[:10,-10:])
+        print(z_batch[:10,-5:])
         test_imgs, g_loss = sess.run([fake_x, g_loss_op], feed_dict={ph_z: z_batch})
         print_img_matrix(10, test_imgs, "no_train", "0")
 
