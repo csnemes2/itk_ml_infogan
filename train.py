@@ -7,7 +7,12 @@ from tf_wrappers import *
 import matplotlib.pyplot as plt
 
 
-def train(generator, discriminator, tf_noise_generator, cpu_noise_generator, cpu_noise_generator_tricky):
+def train(generator,
+          discriminator,
+          tf_noise_generator,
+          cpu_noise_generator,
+          cpu_noise_generator_tricky,
+          q_loss_computation):
     mnist = input_data.read_data_sets("MNIST_data/")
 
     noise_dim = 100
@@ -15,20 +20,23 @@ def train(generator, discriminator, tf_noise_generator, cpu_noise_generator, cpu
     iterations = 100
     epoch_num = 10
 
-    with tf.variable_scope("noise"):
-        mynoise = tf.random_uniform([batch_size, noise_dim], -1., 1.)
-
     # placeholder.shape[0] = batch size, None means arbitrary
     ph_x = tf.placeholder("float", shape=[None, 28, 28, 1])
     ph_z = tf.placeholder("float", shape=[None, noise_dim])
     noise = tf_noise_generator(batch_size, noise_dim)
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        print(sess.run(noise[:20,-10:]))
+
+
 
     # generator
     fake_x = generator(noise, batch_size)
-    fake_d = discriminator(fake_x)
+    fake_d, fake_d_qfunction = discriminator(fake_x)
 
     # discriminator
-    real_d = discriminator(ph_x, reuse=True)
+    #   on real images there is no interpretation of Q1
+    real_d, _ = discriminator(ph_x, reuse=True)
 
     # display
     fake_x_disp = generator(ph_z, batch_size, reuse=True)
@@ -80,8 +88,7 @@ def train(generator, discriminator, tf_noise_generator, cpu_noise_generator, cpu
     g_loss_op = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=fake_d,
                                                                        labels=tf.ones_like(
                                                                            fake_d)))
-    # g_loss_op = tf.reduce_mean(tf.log(1-tf.sigmoid(fake_d)))
-
+    q_loss_op = q_loss_computation(noise, fake_d_qfunction)
 
     tvars = tf.trainable_variables()
 
@@ -90,8 +97,10 @@ def train(generator, discriminator, tf_noise_generator, cpu_noise_generator, cpu
 
     d_trainer_op = tf.train.AdamOptimizer(learning_rate=2e-4, beta1=0.5).minimize(
         d_loss_op, var_list=d_vars)
-    g_trainer_op = tf.train.AdamOptimizer(learning_rate=1e-3, beta1=0.5).minimize(
+    g_trainer_op = tf.train.AdamOptimizer(learning_rate=2e-3, beta1=0.5).minimize(
         g_loss_op, var_list=g_vars)
+    q_trainer_op = tf.train.AdamOptimizer(learning_rate=2e-4, beta1=0.5).minimize(
+        q_loss_op, var_list=tvars)
 
     tricky_z_batch = cpu_noise_generator_tricky(batch_size, noise_dim)
 
@@ -108,11 +117,12 @@ def train(generator, discriminator, tf_noise_generator, cpu_noise_generator, cpu
 
         # no train
         z_batch = cpu_noise_generator(batch_size, noise_dim)
+        print(z_batch[:10,-10:])
         test_imgs, g_loss = sess.run([fake_x, g_loss_op], feed_dict={ph_z: z_batch})
         print_img_matrix(10, test_imgs, "no_train", "0")
 
         # train
-        loss_for_plot = np.zeros((2, epoch_num))
+        loss_for_plot = np.zeros((3, epoch_num))
         for epoch in range(epoch_num):
             widgets = ["epoch #%d|" % epoch, Percentage(), Bar(), ETA()]
             pbar = ProgressBar(maxval=iterations, widgets=widgets)
@@ -120,22 +130,28 @@ def train(generator, discriminator, tf_noise_generator, cpu_noise_generator, cpu
 
             d_loss_avg = 0.0
             g_loss_avg = 0.0
+            q_loss_avg = 0.0
             for i in range(iterations):
                 pbar.update(i)
 
                 real_image_batch, real_label_batch = mnist.train.next_batch(batch_size)
                 real_image_batch = np.reshape(real_image_batch, [batch_size, 28, 28, 1])
 
-                _, d_loss,tn = sess.run([d_trainer_op, d_loss_op,noise],
+                _, d_loss = sess.run([d_trainer_op, d_loss_op],
                                      feed_dict={ph_x: real_image_batch})
                 _, g_loss = sess.run([g_trainer_op, g_loss_op])
 
+                for j in range(0,1):
+                    _, q_loss= sess.run([q_trainer_op, q_loss_op])
+
                 d_loss_avg += (d_loss / iterations)
                 g_loss_avg += (g_loss / iterations)
+                q_loss_avg += (q_loss / iterations)
 
-            print("Epoch %d \n| d_loss= %.5e \n| g_loss= %.5e" % (epoch, d_loss, g_loss))
+            print("Epoch %d \n| d_loss= %.5e \n| g_loss= %.5e \n| q_loss= %.5e" % (epoch, d_loss, g_loss, q_loss))
             loss_for_plot[0, epoch] = d_loss
             loss_for_plot[1, epoch] = g_loss
+            loss_for_plot[2, epoch] = q_loss
             sys.stdout.flush()
 
             test_imgs, g_loss = sess.run([fake_x_disp, g_loss_op],
@@ -150,5 +166,6 @@ def train(generator, discriminator, tf_noise_generator, cpu_noise_generator, cpu
 
         plt.plot(loss_for_plot[0, :], 'r-', label='Disc loss')
         plt.plot(loss_for_plot[1, :], 'b-', label='Gen loss')
+        plt.plot(loss_for_plot[2, :], 'g-', label='Info loss')
         plt.legend()
         plt.savefig('pics/losses.png')
